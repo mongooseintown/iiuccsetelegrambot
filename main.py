@@ -698,6 +698,34 @@ async def handle_service_messages(message: Message):
         logger.debug(f"Service message deletion error: {e}")
 
 
+# --- Block Arbitrary Text / Purely Button-Driven Interface ---
+
+@dp.message(F.chat.type == "private")
+async def handle_unknown_private_message(message: Message, bot: Bot):
+    """Block and auto-delete arbitrary student text to keep the bot purely button driven."""
+    user = message.from_user
+    if not user:
+        return
+
+    # Auto-delete the typed message
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    # Ensure student has a menu card active
+    student = await db.get_student(user.id, db_path=DB_PATH)
+    if not student or not student.get("last_menu_message_id"):
+        kb = await build_semesters_keyboard()
+        sent = await bot.send_message(
+            chat_id=user.id,
+            text="👋 *নিচের মেনু থেকে আপনার সেমিস্টার সিলেক্ট করুন:*",
+            reply_markup=kb,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        await db.set_student_menu_message(user.id, sent.message_id, db_path=DB_PATH)
+
+
 # --- Optional Health Check Server for Render Free Web Service ---
 
 from aiohttp import web
@@ -736,6 +764,13 @@ async def main():
     http_runner = None
     if port_env and port_env.strip().isdigit():
         http_runner = await start_health_server(int(port_env.strip()))
+
+    try:
+        await bot.set_my_commands([
+            types.BotCommand(command="start", description="কোর্স মেনু ওপেন করুন")
+        ])
+    except Exception as e:
+        logger.debug(f"Could not set bot commands: {e}")
 
     logger.info("Starting Telegram long polling...")
     try:
