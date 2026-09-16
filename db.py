@@ -96,11 +96,8 @@ async def init_db(db_path: Optional[str] = None) -> None:
 SIXTH_SEMESTER_COURSES = [
     ("CSE-3525", "Data Communication"),
     ("CSE-3631", "Operating Systems"),
-    ("CSE-3632", "Operating Systems Lab"),
     ("CSE-3635", "Artificial Intelligence"),
-    ("CSE-3636", "Artificial Intelligence Lab"),
     ("CSE-3641", "Software Engineering"),
-    ("CSE-3642", "Software Engineering Lab"),
     ("ECON-3501", "Principles of Economics"),
     ("GEHE-3601", "History of the Emergence of Bangladesh"),
     ("URED-3604", "Life and Teachings of Prophet Muhammad (SAAS)"),
@@ -129,6 +126,12 @@ async def seed_initial_data(db_path: Optional[str] = None) -> None:
                 INSERT INTO semesters (code, name) VALUES (?, ?)
                 ON CONFLICT(code) DO UPDATE SET name = excluded.name;
             """, (sem_code, sem_name))
+        await db.commit()
+
+        # Remove lab courses if previously seeded
+        await db.execute("""
+            DELETE FROM courses WHERE code IN ('CSE-3632', 'CSE-3636', 'CSE-3642') OR name LIKE '%Lab%';
+        """)
         await db.commit()
 
         # Seed 6th Semester courses
