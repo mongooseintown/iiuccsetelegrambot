@@ -55,7 +55,11 @@ async def build_semesters_keyboard() -> InlineKeyboardMarkup:
     buttons = []
     row = []
     for sem in semesters:
-        row.append(InlineKeyboardButton(text=f"🎓 {sem['name']}", callback_data=f"sem:{sem['id']}"))
+        if sem["code"] == "S6":
+            btn = InlineKeyboardButton(text=f"🟢 {sem['name']}", callback_data=f"sem:{sem['id']}")
+        else:
+            btn = InlineKeyboardButton(text=f"🔒 {sem['name']} (অফ)", callback_data=f"sem_locked:{sem['name']}")
+        row.append(btn)
         if len(row) == 2:
             buttons.append(row)
             row = []
@@ -328,6 +332,15 @@ async def handle_unlinked_click(callback: CallbackQuery):
 async def handle_none_click(callback: CallbackQuery):
     await callback.answer(
         "📢 এই সেমিস্টারের কোর্স তালিকা খুব শীঘ্রই যুক্ত করা হবে।",
+        show_alert=True
+    )
+
+
+@dp.callback_query(F.data.startswith("sem_locked:"))
+async def handle_locked_semester(callback: CallbackQuery):
+    sem_name = callback.data.split(":", 1)[1]
+    await callback.answer(
+        f"🔒 {sem_name} বর্তমানে অফ রয়েছে।\nশুধুমাত্র ৬ষ্ঠ সেমিস্টার চালু আছে!",
         show_alert=True
     )
 
