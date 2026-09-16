@@ -217,19 +217,32 @@ async def handle_start(message: Message):
         "Please select your semester to view available courses:"
     )
     logo_file = "assets/logo.jpg"
+    sent = None
     if os.path.exists(logo_file):
-        sent = await message.answer_photo(
-            photo=FSInputFile(logo_file),
-            caption=start_text,
-            reply_markup=kb,
-            parse_mode=ParseMode.MARKDOWN
-        )
-    else:
-        sent = await message.answer(
-            start_text,
-            reply_markup=kb,
-            parse_mode=ParseMode.MARKDOWN
-        )
+        try:
+            sent = await message.answer_photo(
+                photo=FSInputFile(logo_file),
+                caption=start_text,
+                reply_markup=kb,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.warning(f"answer_photo failed: {e}")
+            sent = None
+
+    if not sent:
+        try:
+            sent = await message.answer(
+                start_text,
+                reply_markup=kb,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception:
+            sent = await message.answer(
+                start_text.replace("*", ""),
+                reply_markup=kb
+            )
+
     await db.set_student_menu_message(user.id, sent.message_id, db_path=DB_PATH)
 
 
@@ -802,6 +815,21 @@ async def start_health_server(port: int) -> web.AppRunner:
     return runner
 
 
+async def keep_render_awake(url: str):
+    """Periodically ping self every 8 minutes to prevent Render free tier from sleeping."""
+    await asyncio.sleep(30)
+    import aiohttp
+    logger.info(f"Self-ping keep-alive loop initiated for: {url}")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(f"{url}/health", timeout=15) as resp:
+                    logger.debug(f"Render keep-alive ping status: {resp.status}")
+            except Exception as e:
+                logger.debug(f"Render keep-alive ping failed: {e}")
+            await asyncio.sleep(480)
+
+
 # --- Application Startup ---
 
 async def main():
@@ -821,6 +849,8 @@ async def main():
     http_runner = None
     if port_env and port_env.strip().isdigit():
         http_runner = await start_health_server(int(port_env.strip()))
+        render_url = os.getenv("RENDER_EXTERNAL_URL") or "https://iiuccsetelegrambot.onrender.com"
+        asyncio.create_task(keep_render_awake(render_url))
 
     try:
         await bot.set_my_commands([
