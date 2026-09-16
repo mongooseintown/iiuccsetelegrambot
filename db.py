@@ -53,8 +53,8 @@ async def init_db(db_path: Optional[str] = None) -> None:
                 semester_id INTEGER NOT NULL REFERENCES semesters(id) ON DELETE CASCADE,
                 code TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
-                chat_id INTEGER UNIQUE NOT NULL,
-                invite_link TEXT NOT NULL,
+                chat_id INTEGER UNIQUE,
+                invite_link TEXT,
                 is_active INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -88,6 +88,47 @@ async def init_db(db_path: Optional[str] = None) -> None:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_courses_semester ON courses(semester_id);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_requests_status ON join_requests(status);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_requests_user ON join_requests(user_id);")
+        await db.commit()
+
+    await seed_initial_data(db_path)
+
+
+SIXTH_SEMESTER_COURSES = [
+    ("CSE-3525", "Data Communication"),
+    ("CSE-3631", "Operating Systems"),
+    ("CSE-3632", "Operating Systems Lab"),
+    ("CSE-3635", "Artificial Intelligence"),
+    ("CSE-3636", "Artificial Intelligence Lab"),
+    ("CSE-3641", "Software Engineering"),
+    ("CSE-3642", "Software Engineering Lab"),
+    ("ECON-3501", "Principles of Economics"),
+    ("GEHE-3601", "History of the Emergence of Bangladesh"),
+    ("URED-3604", "Life and Teachings of Prophet Muhammad (SAAS)"),
+    ("CSE-4750", "Technical Writing and Presentation"),
+]
+
+
+async def seed_initial_data(db_path: Optional[str] = None) -> None:
+    """Pre-seed 6th Semester and its official courses automatically."""
+    async with get_db(db_path) as db:
+        await db.execute("""
+            INSERT INTO semesters (code, name) VALUES ('S6', '6th Semester (CSE)')
+            ON CONFLICT(code) DO UPDATE SET name = excluded.name;
+        """)
+        await db.commit()
+
+        async with db.execute("SELECT id FROM semesters WHERE code = 'S6';") as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return
+            sem_id = row["id"]
+
+        for code, name in SIXTH_SEMESTER_COURSES:
+            await db.execute("""
+                INSERT INTO courses (semester_id, code, name, is_active)
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT(code) DO UPDATE SET name = excluded.name;
+            """, (sem_id, code, name))
         await db.commit()
 
 
@@ -191,21 +232,42 @@ async def register_course(
     code = code.strip().upper()
     name = name.strip()
     async with get_db(db_path) as db:
+        # If chat_id was assigned to a different course previously, clear it
         await db.execute(
-            """
-            INSERT INTO courses (semester_id, code, name, chat_id, invite_link, is_active)
-            VALUES (?, ?, ?, ?, ?, 1)
-            ON CONFLICT(chat_id) DO UPDATE SET
-                semester_id = excluded.semester_id,
-                code = excluded.code,
-                name = excluded.name,
-                invite_link = excluded.invite_link,
-                is_active = 1;
-            """,
-            (semester_id, code, name, chat_id, invite_link)
+            "UPDATE courses SET chat_id = NULL, invite_link = NULL WHERE chat_id = ? AND code != ?;",
+            (chat_id, code)
         )
+
+        async with db.execute("SELECT id, name FROM courses WHERE code = ?;", (code,)) as cursor:
+            existing = await cursor.fetchone()
+
+        final_name = name if name else (existing["name"] if existing else code)
+
+        if existing:
+            await db.execute(
+                """
+                UPDATE courses
+                SET semester_id = ?, name = ?, chat_id = ?, invite_link = ?, is_active = 1
+                WHERE code = ?;
+                """,
+                (semester_id, final_name, chat_id, invite_link, code)
+            )
+        else:
+            await db.execute(
+                """
+                INSERT INTO courses (semester_id, code, name, chat_id, invite_link, is_active)
+                VALUES (?, ?, ?, ?, ?, 1)
+                ON CONFLICT(code) DO UPDATE SET
+                    semester_id = excluded.semester_id,
+                    name = excluded.name,
+                    chat_id = excluded.chat_id,
+                    invite_link = excluded.invite_link,
+                    is_active = 1;
+                """,
+                (semester_id, code, final_name, chat_id, invite_link)
+            )
         await db.commit()
-        async with db.execute("SELECT * FROM courses WHERE chat_id = ?;", (chat_id,)) as cursor:
+        async with db.execute("SELECT * FROM courses WHERE code = ?;", (code,)) as cursor:
             row = await cursor.fetchone()
             return dict(row)
 

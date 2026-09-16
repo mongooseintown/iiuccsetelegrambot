@@ -64,27 +64,32 @@ async def build_courses_keyboard(semester_id: int, user_id: int) -> InlineKeyboa
     buttons = []
 
     for c in courses:
-        chat_id = c["chat_id"]
-        status = await db.get_user_course_status(chat_id, user_id, db_path=DB_PATH)
+        chat_id = c.get("chat_id")
+        invite_link = c.get("invite_link")
 
-        if status == "approved":
-            # Already joined: non-reusable alert button
+        if not chat_id or not invite_link:
             btn = InlineKeyboardButton(
-                text=f"✅ {c['code']} - {c['name']}",
-                callback_data=f"status:approved:{c['id']}"
-            )
-        elif status == "pending":
-            # Request pending: non-reusable alert button
-            btn = InlineKeyboardButton(
-                text=f"⏳ {c['code']} - {c['name']}",
-                callback_data=f"status:pending:{c['id']}"
+                text=f"🔜 {c['code']} - {c['name']} (শীঘ্রই)",
+                callback_data=f"status:unlinked:{c['id']}"
             )
         else:
-            # Available: direct invite link with creates_join_request=True
-            btn = InlineKeyboardButton(
-                text=f"➕ {c['code']} - {c['name']}",
-                url=c["invite_link"]
-            )
+            status = await db.get_user_course_status(chat_id, user_id, db_path=DB_PATH)
+
+            if status == "approved":
+                btn = InlineKeyboardButton(
+                    text=f"✅ {c['code']} - {c['name']}",
+                    callback_data=f"status:approved:{c['id']}"
+                )
+            elif status == "pending":
+                btn = InlineKeyboardButton(
+                    text=f"⏳ {c['code']} - {c['name']}",
+                    callback_data=f"status:pending:{c['id']}"
+                )
+            else:
+                btn = InlineKeyboardButton(
+                    text=f"➕ {c['code']} - {c['name']}",
+                    url=invite_link
+                )
         buttons.append([btn])
 
     # Control buttons
@@ -260,6 +265,14 @@ async def handle_approved_click(callback: CallbackQuery):
     )
 
 
+@dp.callback_query(F.data.startswith("status:unlinked:"))
+async def handle_unlinked_click(callback: CallbackQuery):
+    await callback.answer(
+        "📢 এই কোর্সের টেলিগ্রাম গ্রুপ খুব শীঘ্রই যুক্ত করা হবে!",
+        show_alert=True
+    )
+
+
 # --- Admin Claim & Privilege Commands ---
 
 @dp.message(Command("claim"), F.chat.type == "private")
@@ -355,22 +368,29 @@ async def handle_register_course(message: Message, bot: Bot):
         return
 
     parts = message.text.strip().split(maxsplit=3)
-    if len(parts) < 4:
+    if len(parts) < 3:
         await message.answer(
-            "⚠️ Usage inside group:\n`/registercourse <SEM_CODE> <COURSE_CODE> <Full Course Name>`\n"
-            "Example:\n`/registercourse S1 CSE101 Data Structures`",
+            "⚠️ Usage inside group:\n`/registercourse <SEM_CODE> <COURSE_CODE> [Course Name]`\n"
+            "Example:\n`/registercourse S6 CSE-3525`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
 
     sem_code = parts[1].strip().upper()
     course_code = parts[2].strip().upper()
-    course_name = parts[3].strip()
+    course_name = parts[3].strip() if len(parts) >= 4 else ""
 
     sem = await db.get_semester_by_code(sem_code, db_path=DB_PATH)
     if not sem:
         await message.answer(f"❌ Semester code `{sem_code}` not found. Please create it first using `/addsemester`.", parse_mode=ParseMode.MARKDOWN)
         return
+
+    existing_course = await db.get_course_by_code(course_code, db_path=DB_PATH)
+    if not course_name:
+        if existing_course:
+            course_name = existing_course["name"]
+        else:
+            course_name = course_code
 
     # Verify bot permissions in this group
     try:
