@@ -144,6 +144,20 @@ async def handle_start(message: Message):
     if not user:
         return
 
+    # Fetch previous student record to delete old menu message if exists
+    student = await db.get_student(user.id, db_path=DB_PATH)
+    if student and student.get("last_menu_message_id"):
+        try:
+            await message.bot.delete_message(chat_id=user.id, message_id=student["last_menu_message_id"])
+        except Exception:
+            pass
+
+    # Auto-delete user's /start command prompt message for a clean chat view
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     # Record or update student info
     await db.upsert_student(
         telegram_id=user.id,
@@ -154,10 +168,11 @@ async def handle_start(message: Message):
 
     semesters = await db.get_semesters(active_only=True, db_path=DB_PATH)
     if not semesters:
-        await message.answer(
+        sent = await message.answer(
             "👋 Welcome! Currently no semesters or courses are published.\n"
             "Please check back soon or contact your department admin."
         )
+        await db.set_student_menu_message(user.id, sent.message_id, db_path=DB_PATH)
         return
 
     kb = await build_semesters_keyboard()
