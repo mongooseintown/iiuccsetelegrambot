@@ -53,10 +53,14 @@ if not BOOTSTRAP_CODE:
 async def build_semesters_keyboard() -> InlineKeyboardMarkup:
     semesters = await db.get_semesters(active_only=True, db_path=DB_PATH)
     buttons = []
+    row = []
     for sem in semesters:
-        buttons.append([
-            InlineKeyboardButton(text=f"🎓 {sem['name']}", callback_data=f"sem:{sem['id']}")
-        ])
+        row.append(InlineKeyboardButton(text=f"🎓 {sem['name']}", callback_data=f"sem:{sem['id']}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -64,34 +68,39 @@ async def build_courses_keyboard(semester_id: int, user_id: int) -> InlineKeyboa
     courses = await db.get_courses_by_semester(semester_id, active_only=True, db_path=DB_PATH)
     buttons = []
 
-    for c in courses:
-        chat_id = c.get("chat_id")
-        invite_link = c.get("invite_link")
+    if not courses:
+        buttons.append([
+            InlineKeyboardButton(text="📢 কোর্স তালিকা শীঘ্রই যুক্ত হবে", callback_data="none")
+        ])
+    else:
+        for c in courses:
+            chat_id = c.get("chat_id")
+            invite_link = c.get("invite_link")
 
-        if not chat_id or not invite_link:
-            btn = InlineKeyboardButton(
-                text=f"🔜 {c['code']} - {c['name']} (শীঘ্রই)",
-                callback_data=f"status:unlinked:{c['id']}"
-            )
-        else:
-            status = await db.get_user_course_status(chat_id, user_id, db_path=DB_PATH)
-
-            if status == "approved":
+            if not chat_id or not invite_link:
                 btn = InlineKeyboardButton(
-                    text=f"✅ {c['code']} - {c['name']}",
-                    callback_data=f"status:approved:{c['id']}"
-                )
-            elif status == "pending":
-                btn = InlineKeyboardButton(
-                    text=f"⏳ {c['code']} - {c['name']}",
-                    callback_data=f"status:pending:{c['id']}"
+                    text=f"🔜 {c['code']} - {c['name']} (শীঘ্রই)",
+                    callback_data=f"status:unlinked:{c['id']}"
                 )
             else:
-                btn = InlineKeyboardButton(
-                    text=f"➕ {c['code']} - {c['name']}",
-                    url=invite_link
-                )
-        buttons.append([btn])
+                status = await db.get_user_course_status(chat_id, user_id, db_path=DB_PATH)
+
+                if status == "approved":
+                    btn = InlineKeyboardButton(
+                        text=f"✅ {c['code']} - {c['name']}",
+                        callback_data=f"status:approved:{c['id']}"
+                    )
+                elif status == "pending":
+                    btn = InlineKeyboardButton(
+                        text=f"⏳ {c['code']} - {c['name']}",
+                        callback_data=f"status:pending:{c['id']}"
+                    )
+                else:
+                    btn = InlineKeyboardButton(
+                        text=f"➕ {c['code']} - {c['name']}",
+                        url=invite_link
+                    )
+            buttons.append([btn])
 
     # Control buttons
     buttons.append([
@@ -311,6 +320,14 @@ async def handle_approved_click(callback: CallbackQuery):
 async def handle_unlinked_click(callback: CallbackQuery):
     await callback.answer(
         "📢 এই কোর্সের টেলিগ্রাম গ্রুপ খুব শীঘ্রই যুক্ত করা হবে!",
+        show_alert=True
+    )
+
+
+@dp.callback_query(F.data == "none")
+async def handle_none_click(callback: CallbackQuery):
+    await callback.answer(
+        "📢 এই সেমিস্টারের কোর্স তালিকা খুব শীঘ্রই যুক্ত করা হবে।",
         show_alert=True
     )
 

@@ -108,15 +108,30 @@ SIXTH_SEMESTER_COURSES = [
 ]
 
 
+ALL_SEMESTERS = [
+    ("S1", "1st Semester"),
+    ("S2", "2nd Semester"),
+    ("S3", "3rd Semester"),
+    ("S4", "4th Semester"),
+    ("S5", "5th Semester"),
+    ("S6", "6th Semester (CSE)"),
+    ("S7", "7th Semester"),
+    ("S8", "8th Semester"),
+]
+
+
 async def seed_initial_data(db_path: Optional[str] = None) -> None:
-    """Pre-seed 6th Semester and its official courses automatically."""
+    """Pre-seed Semesters 1 to 8 and 6th Semester official courses automatically."""
     async with get_db(db_path) as db:
-        await db.execute("""
-            INSERT INTO semesters (code, name) VALUES ('S6', '6th Semester (CSE)')
-            ON CONFLICT(code) DO UPDATE SET name = excluded.name;
-        """)
+        # Pre-seed Semesters 1 to 8
+        for sem_code, sem_name in ALL_SEMESTERS:
+            await db.execute("""
+                INSERT INTO semesters (code, name) VALUES (?, ?)
+                ON CONFLICT(code) DO UPDATE SET name = excluded.name;
+            """, (sem_code, sem_name))
         await db.commit()
 
+        # Seed 6th Semester courses
         async with db.execute("SELECT id FROM semesters WHERE code = 'S6';") as cursor:
             row = await cursor.fetchone()
             if not row:
