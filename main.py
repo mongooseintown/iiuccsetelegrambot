@@ -21,6 +21,7 @@ from aiogram.types import (
     ChatJoinRequest,
     ChatMemberUpdated,
     ContentType,
+    FSInputFile,
 )
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -101,6 +102,16 @@ async def build_courses_keyboard(semester_id: int, user_id: int) -> InlineKeyboa
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+async def safe_edit_message(message: Message, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None) -> None:
+    try:
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await message.edit_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    except TelegramBadRequest:
+        pass
+
+
 async def refresh_student_menu(bot: Bot, user_id: int) -> None:
     """Helper to live-update the student's open menu in private chat."""
     try:
@@ -120,13 +131,25 @@ async def refresh_student_menu(bot: Bot, user_id: int) -> None:
             "⏳ = Request Pending\n"
             "✅ = Already Joined"
         )
-        await bot.edit_message_text(
-            chat_id=user_id,
-            message_id=student["last_menu_message_id"],
-            text=text,
-            reply_markup=kb,
-            parse_mode=ParseMode.MARKDOWN
-        )
+        try:
+            await bot.edit_message_caption(
+                chat_id=user_id,
+                message_id=student["last_menu_message_id"],
+                caption=text,
+                reply_markup=kb,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except TelegramBadRequest:
+            try:
+                await bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=student["last_menu_message_id"],
+                    text=text,
+                    reply_markup=kb,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except TelegramBadRequest:
+                pass
     except Exception as e:
         logger.debug(f"Could not live-refresh student {user_id} menu: {e}")
 
@@ -176,12 +199,24 @@ async def handle_start(message: Message):
         return
 
     kb = await build_semesters_keyboard()
-    sent = await message.answer(
+    start_text = (
         "👋 *Welcome to the Course Group Join Bot!*\n\n"
-        "Please select your semester to view available courses:",
-        reply_markup=kb,
-        parse_mode=ParseMode.MARKDOWN
+        "Please select your semester to view available courses:"
     )
+    logo_file = "assets/logo.jpg"
+    if os.path.exists(logo_file):
+        sent = await message.answer_photo(
+            photo=FSInputFile(logo_file),
+            caption=start_text,
+            reply_markup=kb,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        sent = await message.answer(
+            start_text,
+            reply_markup=kb,
+            parse_mode=ParseMode.MARKDOWN
+        )
     await db.set_student_menu_message(user.id, sent.message_id, db_path=DB_PATH)
 
 
@@ -211,11 +246,8 @@ async def handle_select_semester(callback: CallbackQuery, bot: Bot):
     )
 
     if callback.message:
-        try:
-            await callback.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-            await db.set_student_menu_message(user.id, callback.message.message_id, db_path=DB_PATH)
-        except TelegramBadRequest:
-            pass
+        await safe_edit_message(callback.message, text, kb)
+        await db.set_student_menu_message(user.id, callback.message.message_id, db_path=DB_PATH)
     await callback.answer()
 
 
@@ -243,10 +275,7 @@ async def handle_refresh_courses(callback: CallbackQuery):
     )
 
     if callback.message:
-        try:
-            await callback.message.edit_text(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-        except TelegramBadRequest:
-            pass  # Message is already up to date
+        await safe_edit_message(callback.message, text, kb)
     await callback.answer("List refreshed!")
 
 
@@ -254,13 +283,11 @@ async def handle_refresh_courses(callback: CallbackQuery):
 async def handle_change_semester(callback: CallbackQuery):
     kb = await build_semesters_keyboard()
     if callback.message:
-        try:
-            await callback.message.edit_text(
-                "Please select your semester:",
-                reply_markup=kb
-            )
-        except TelegramBadRequest:
-            pass
+        await safe_edit_message(
+            callback.message,
+            "👋 *Please select your semester:*",
+            kb
+        )
     await callback.answer()
 
 
