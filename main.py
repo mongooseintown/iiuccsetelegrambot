@@ -663,6 +663,25 @@ async def handle_service_messages(message: Message):
         logger.debug(f"Service message deletion error: {e}")
 
 
+# --- Optional Health Check Server for Render Free Web Service ---
+
+from aiohttp import web
+
+async def handle_health(request: web.Request) -> web.Response:
+    return web.Response(text="Bot is running!")
+
+async def start_health_server(port: int) -> web.AppRunner:
+    app = web.Application()
+    app.router.add_get("/", handle_health)
+    app.router.add_get("/health", handle_health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health check HTTP server active on port {port}")
+    return runner
+
+
 # --- Application Startup ---
 
 async def main():
@@ -678,6 +697,11 @@ async def main():
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
 
+    port_env = os.getenv("PORT")
+    http_runner = None
+    if port_env and port_env.strip().isdigit():
+        http_runner = await start_health_server(int(port_env.strip()))
+
     logger.info("Starting Telegram long polling...")
     try:
         await dp.start_polling(
@@ -685,8 +709,11 @@ async def main():
             allowed_updates=["message", "callback_query", "chat_join_request", "chat_member"]
         )
     finally:
+        if http_runner:
+            await http_runner.cleanup()
         await bot.session.close()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
